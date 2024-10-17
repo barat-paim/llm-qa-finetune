@@ -1,0 +1,32 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+results/
+logs/
+*.pt
+*.bin
+pytorch/
+
+image_dataset/
+data/
+
+# Additional entries based on your directory listing
+llama_3_2_1b_model/
+*.json
+*.log
+
+# Temporary files
+*.swp
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
