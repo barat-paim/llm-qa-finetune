@@ -8,11 +8,17 @@ from torch.utils.data import Dataset, DataLoader
 from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
 import psutil
 import GPUtil
+from tqdm import tqdm
 
 def print_gpu_memory():
     print(f"GPU Memory: Allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB, "
           f"Cached: {torch.cuda.memory_reserved() / 1e9:.2f} GB")
     
+def print_gpu_utilization():
+    print(f"GPU memory allocated: {torch.cuda.memory_allocated() / 1e9:.3f} GB")
+    print(f"GPU memory reserved: {torch.cuda.memory_reserved() / 1e9:.3f} GB")
+    print(f"GPU memory cached: {torch.cuda.memory_cached() / 1e9:.3f} GB")
+
 # Step 1: Load the SQuAD dataset
 squad_dataset = load_from_disk("./data/squad")
 
