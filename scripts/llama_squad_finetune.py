@@ -8,7 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
 import psutil
 import GPUtil
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 def print_gpu_memory():
     print(f"GPU Memory: Allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB, "
@@ -159,6 +159,11 @@ print_gpu_memory()
 class GPUMemoryCallback(TrainerCallback):
     def __init__(self, gpu_id=0):
         self.gpu_id = gpu_id
+        self.progress_bar = None
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        total_steps = state.max_steps if state.max_steps > 0 else args.num_train_epochs * state.num_train_epochs
+        self.progress_bar = tqdm(total=total_steps, desc="Training")
 
     def on_step_end(self, args, state, control, **kwargs):
         if state.global_step % 100 == 0:  # Log every 100 steps
@@ -166,7 +171,19 @@ class GPUMemoryCallback(TrainerCallback):
             memory_used = gpu.memoryUsed
             memory_total = gpu.memoryTotal
             cpu_percent = psutil.cpu_percent()
-            print(f"Step {state.global_step}: GPU Memory: {memory_used}/{memory_total} MB, CPU: {cpu_percent}%")
+            self.progress_bar.set_postfix({
+                'GPU Mem': f"{memory_used}/{memory_total} MB",
+                'CPU': f"{cpu_percent}%"
+            })
+        self.progress_bar.update(1)
+
+    def on_train_end(self, args, state, control, **kwargs):
+        if self.progress_bar:
+            self.progress_bar.close()
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if logs:
+            self.progress_bar.set_postfix(logs)
 
 # Initialize Trainer with the new callback
 trainer = Trainer(
