@@ -2,10 +2,12 @@ import torch
 import os
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 torch.cuda.empty_cache()
-from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments, TrainerCallback, BitsAndBytesConfig
+from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments, TrainerCallback
 from datasets import load_from_disk
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
+import psutil
+import GPUtil
 
 def print_gpu_memory():
     print(f"GPU Memory: Allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB, "
@@ -19,6 +21,9 @@ model_path = "./llama_3_2_1b_model"
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 print("Before model loading:")
 print_gpu_memory()
+
+# New: Use BitsAndBytesConfig for 8-bit quantization
+from transformers import BitsAndBytesConfig
 
 quantization_config = BitsAndBytesConfig(
     load_in_8bit=True,
@@ -34,7 +39,7 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 model = prepare_model_for_kbit_training(model)
 
-# Add LoRA configuration
+# New: Add LoRA configuration
 peft_config = LoraConfig(
     r=16,
     lora_alpha=32,
@@ -44,7 +49,7 @@ peft_config = LoraConfig(
     task_type="CAUSAL_LM"
 )
 
-# Wrap the model with LoRA
+# New: Wrap the model with LoRA
 model = get_peft_model(model, peft_config)
 
 print("After model loading and LoRA configuration:")
@@ -94,56 +99,76 @@ class SQuADDataset(Dataset):
 train_dataset = SQuADDataset(squad_dataset['train'], tokenizer)
 eval_dataset = SQuADDataset(squad_dataset['validation'], tokenizer)
 
+# New: Optimized data loading function
+def create_dataloaders(train_dataset, eval_dataset, batch_size, num_workers=4):
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True
+    )
+    eval_dataloader = DataLoader(
+        eval_dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        pin_memory=True
+    )
+    return train_dataloader, eval_dataloader
+
+# Use this function after creating your datasets
+train_dataloader, eval_dataloader = create_dataloaders(train_dataset, eval_dataset, batch_size=8)
+
 # Step 4: Fine-Tuning Loop
+# New: Updated TrainingArguments for better performance
 training_args = TrainingArguments(
     output_dir='./results',
+    num_train_epochs=3,
+    per_device_train_batch_size=8,
+    per_device_eval_batch_size=8,
+    gradient_accumulation_steps=4,
     evaluation_strategy="steps",
     eval_steps=500,
-    learning_rate=3e-4,  # Slightly higher learning rate for LoRA
-    per_device_train_batch_size=1,
-    per_device_eval_batch_size=1,
-    num_train_epochs=1,
+    logging_steps=100,
+    learning_rate=5e-4,
     weight_decay=0.01,
-    logging_dir='./logs',
-    logging_steps=10,
-    save_steps=1000,
-    save_total_limit=2,
     fp16=True,
-    gradient_accumulation_steps=16,
-    gradient_checkpointing=True,
-    optim="paged_adamw_8bit",
+    bf16=False,
     max_grad_norm=0.3,
+    max_steps=-1,
     warmup_ratio=0.03,
-    lr_scheduler_type="constant",
+    group_by_length=True,
+    save_strategy="steps",
+    save_steps=500,
+    save_total_limit=3,
+    load_best_model_at_end=True,
+    optim="paged_adamw_32bit",
+    lr_scheduler_type="cosine",
 )
 
 print("Before trainer initialization:")
 print_gpu_memory()
 
-class MemoryEfficientCallback(TrainerCallback):
-    def __init__(self):
-        self.total_loss = 0.0
-        self.step_count = 0
+# New: Custom callback for GPU monitoring
+class GPUMemoryCallback(TrainerCallback):
+    def __init__(self, gpu_id=0):
+        self.gpu_id = gpu_id
 
     def on_step_end(self, args, state, control, **kwargs):
-        if 'loss' in kwargs:
-            self.total_loss += kwargs['loss'].item()
-            self.step_count += 1
+        if state.global_step % 100 == 0:  # Log every 100 steps
+            gpu = GPUtil.getGPUs()[self.gpu_id]
+            memory_used = gpu.memoryUsed
+            memory_total = gpu.memoryTotal
+            cpu_percent = psutil.cpu_percent()
+            print(f"Step {state.global_step}: GPU Memory: {memory_used}/{memory_total} MB, CPU: {cpu_percent}%")
 
-    def on_epoch_end(self, args, state, control, **kwargs):
-        if self.step_count > 0:
-            avg_loss = self.total_loss / self.step_count
-            print(f"Average loss for epoch: {avg_loss:.4f}")
-        self.total_loss = 0.0
-        self.step_count = 0
-
-memory_efficient_callback = MemoryEfficientCallback()
+# Initialize Trainer with the new callback
 trainer = Trainer(
     model=model,
     args=training_args,
     train_dataset=train_dataset,
     eval_dataset=eval_dataset,
-    callbacks=[MemoryEfficientCallback()]
+    callbacks=[GPUMemoryCallback()],
 )
 
 print("After trainer initialization:")
