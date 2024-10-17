@@ -11,14 +11,11 @@ import GPUtil
 from tqdm.auto import tqdm
 
 def print_gpu_memory():
-    print(f"GPU Memory: Allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB, "
-          f"Cached: {torch.cuda.memory_reserved() / 1e9:.2f} GB")
+    allocated = torch.cuda.memory_allocated() / 1e9
+    reserved = torch.cuda.memory_reserved() / 1e9
+    print(f"GPU Memory: Allocated: {allocated:.2f} GB, "
+          f"Reserved: {reserved:.2f} GB")
     
-def print_gpu_utilization():
-    print(f"GPU memory allocated: {torch.cuda.memory_allocated() / 1e9:.3f} GB")
-    print(f"GPU memory reserved: {torch.cuda.memory_reserved() / 1e9:.3f} GB")
-    print(f"GPU memory cached: {torch.cuda.memory_cached() / 1e9:.3f} GB")
-
 # Step 1: Load the SQuAD dataset
 squad_dataset = load_from_disk("./data/squad")
 
@@ -130,12 +127,12 @@ train_dataloader, eval_dataloader = create_dataloaders(train_dataset, eval_datas
 training_args = TrainingArguments(
     output_dir='./results',
     num_train_epochs=3,
-    per_device_train_batch_size=8,
-    per_device_eval_batch_size=8,
-    gradient_accumulation_steps=4,
-    evaluation_strategy="steps",
-    eval_steps=500,
-    logging_steps=100,
+    per_device_train_batch_size=16,
+    per_device_eval_batch_size=16,
+    gradient_accumulation_steps=2,
+    eval_strategy="steps",
+    eval_steps=250,
+    logging_steps=50,
     learning_rate=5e-4,
     weight_decay=0.01,
     fp16=True,
@@ -145,8 +142,8 @@ training_args = TrainingArguments(
     warmup_ratio=0.03,
     group_by_length=True,
     save_strategy="steps",
-    save_steps=500,
-    save_total_limit=3,
+    save_steps=250,
+    save_total_limit=2,
     load_best_model_at_end=True,
     optim="paged_adamw_32bit",
     lr_scheduler_type="cosine",
