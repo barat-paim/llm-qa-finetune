@@ -155,6 +155,7 @@ scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=1000, T_mult=2, eta_min=1
 
 # Update training arguments
 training_args = TrainingArguments(
+    dataloader_num_workers=4,
     output_dir='./results',
     num_train_epochs=3,  # 
     per_device_train_batch_size=16, # GPU allows increase batch size
