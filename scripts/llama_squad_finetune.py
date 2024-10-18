@@ -18,12 +18,15 @@ def print_gpu_memory():
           f"Reserved: {reserved:.2f} GB")
     
 # Step 1: Load the SQuAD dataset
+print("\nLoading SQuAD dataset:\n")
 squad_dataset = load_from_disk("./data/squad")
+print("Loaded SQuAD dataset.\n")
 
 # Step 2: Model Setup
+print("\nLoading model:\n")
 model_path = "./llama_3_2_1b_model"
 tokenizer = AutoTokenizer.from_pretrained(model_path)
-print("Before model loading:")
+print("\nMemory after loading the tokenizer:\n")
 print_gpu_memory()
 
 # New: Use BitsAndBytesConfig for 8-bit quantization
@@ -35,6 +38,7 @@ quantization_config = BitsAndBytesConfig(
     llm_int8_has_fp16_weight=False,
 )
 
+print("\nLoading model with quantization:\n")
 model = AutoModelForCausalLM.from_pretrained(
     model_path,
     quantization_config=quantization_config,
@@ -42,8 +46,9 @@ model = AutoModelForCausalLM.from_pretrained(
     torch_dtype=torch.float16,
 )
 model = prepare_model_for_kbit_training(model)
-
+print("\nModel prepared for kbit training:\n")
 # New: Add LoRA configuration
+print("\nAdding LoRA configuration:\n")
 peft_config = LoraConfig(
     r=16,
     lora_alpha=32,
@@ -55,14 +60,16 @@ peft_config = LoraConfig(
 
 # New: Wrap the model with LoRA
 model = get_peft_model(model, peft_config)
-
-print("After model loading and LoRA configuration:")
+print("\nModel wrapped with LoRA:\n")
+print("\nMemory after model loading and LoRA configuration:\n")
 print_gpu_memory()
 
 # Ensure the tokenizer has a pad token
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
     model.config.pad_token_id = model.config.eos_token_id
+
+print("\nSetting pad token and pad token id:\n")
 
 # Step 3: Prepare the dataset
 class SQuADDataset(Dataset):
@@ -97,30 +104,30 @@ class SQuADDataset(Dataset):
             "labels": labels
         }
 
+print("\nLoading datasets:\n")
 def load_squad_dataset(tokenizer, max_train_samples=None, max_eval_samples=None):
     squad_dataset = load_from_disk("./data/squad")
-    
+    print("\nDataset loaded.\n")
     train_dataset = squad_dataset['train']
     eval_dataset = squad_dataset['validation']
-    
+    print("\nDataset split into train and eval.\n")
     if max_train_samples is not None and len(train_dataset) > max_train_samples:
         train_dataset = train_dataset.select(range(max_train_samples))
-    
+        print("\nTrain dataset size reduced to max_train_samples.\n")
     if max_eval_samples is not None and len(eval_dataset) > max_eval_samples:
         eval_dataset = eval_dataset.select(range(max_eval_samples))
-    
+        print("\nEval dataset size reduced to max_eval_samples.\n")
     return SQuADDataset(train_dataset, tokenizer), SQuADDataset(eval_dataset, tokenizer)
 
 # Create datasets
 max_train_samples = 10000  # Reduced from 30000
 max_eval_samples = 1000   # Reduced from 3000
-
-print("Loading datasets...")
 train_dataset, eval_dataset = load_squad_dataset(tokenizer, max_train_samples, max_eval_samples)
-print(f"Datasets loaded. Train size: {len(train_dataset)}, Eval size: {len(eval_dataset)}")
+print(f"\nDatasets loaded. Train size: {len(train_dataset)}, Eval size: {len(eval_dataset)}\n   ")
 
 # New: Optimized data loading function
 def create_dataloaders(train_dataset, eval_dataset, batch_size, num_workers=4):
+    print("\nCreating dataloaders:\n")
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -138,13 +145,14 @@ def create_dataloaders(train_dataset, eval_dataset, batch_size, num_workers=4):
 
 # New: Learning Rate Finder
 def find_learning_rate(model, train_dataset, device, batch_size=8):
+    print("\nFinding learning rate:\n")
     dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     optimizer = Adam(model.parameters(), lr=1e-7)
     lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=1.1)
-    
+    print("\nTraining a model to find learning rate:\n")
     model.train()
     lrs, losses = [], []
-    for batch in dataloader:
+    for batch in tqdm(dataloader, desc="Finding learning rate"):
         batch = {k: v.to(device) for k, v in batch.items()}
         optimizer.zero_grad()
         outputs = model(**batch)
@@ -152,25 +160,21 @@ def find_learning_rate(model, train_dataset, device, batch_size=8):
         loss.backward()
         optimizer.step()
         lr_scheduler.step()
-        
         lrs.append(optimizer.param_groups[0]['lr'])
         losses.append(loss.item())
-        
+        print(f"\nLearning rate: {optimizer.param_groups[0]['lr']}, Loss: {loss.item()}\n")
         if optimizer.param_groups[0]['lr'] > 10:
             break
-    
+    print(f"\nLearning rate found")
     return lrs, losses
 
 # Use this function before training
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# Comment out or remove the learning rate finder
-# lrs, losses = find_learning_rate(model, train_dataset, device)
-# optimal_lr = lrs[losses.index(min(losses))]
-# print(f"Optimal learning rate: {optimal_lr}")
-
-# Use a default learning rate
-default_lr = 5e-5  # This is a common default for fine-tuning
+print("\nDevice:\n")
+print(device)
+lrs, losses = find_learning_rate(model, train_dataset, device)
+optimal_lr = lrs[losses.index(min(losses))]
+print(f"\nOptimal learning rate: {optimal_lr}\n")
 
 # Update training arguments
 training_args = TrainingArguments(
@@ -182,7 +186,7 @@ training_args = TrainingArguments(
     eval_strategy="steps",
     eval_steps=100,  # 
     logging_steps=50,  # 
-    learning_rate=default_lr, # Set default to 5e-5
+    learning_rate=optimal_lr, # Set default to 5e-5
     weight_decay=0.01,
     fp16=True,
     bf16=False,
@@ -198,7 +202,7 @@ training_args = TrainingArguments(
     lr_scheduler_type="cosine",
 )
 
-print("Before trainer initialization:")
+print("\nBefore trainer initialization:\n")
 print_gpu_memory()
 
 # New: Custom callback for GPU monitoring
@@ -232,6 +236,7 @@ class GPUMemoryCallback(TrainerCallback):
             self.progress_bar.set_postfix(logs)
 
 # Initialize Trainer with the new callback
+print("\nInitializing Trainer:\n")
 trainer = Trainer(
     model=model,
     args=training_args,
@@ -239,18 +244,21 @@ trainer = Trainer(
     eval_dataset=eval_dataset,
     callbacks=[GPUMemoryCallback()],
 )
-
-print("After trainer initialization:")
+print("\nTrainer initialized.\n")
+print("\nGPU Memory for trainer:\n")
 print_gpu_memory()
 
 # Start fine-tuning
-print("Before training:")
+print("\nGPU Memory before training:\n")
 print_gpu_memory()
 
-print("Starting training...")
+print("\n**********\n")
+print("\nFinally, Hold on to your hats, and start training...\n")
 trainer.train()
 
-print("Training completed. Saving model...")
+print("\n**********\n")
+
+print("\nTraining completed. Saving model...\n")
 model.save_pretrained("./fine_tuned_llama_squad")
 tokenizer.save_pretrained("./fine_tuned_llama_squad")
-print("Model saved. Process complete.")
+print("\nModel saved. Process complete.\n")
