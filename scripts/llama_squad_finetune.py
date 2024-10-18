@@ -157,9 +157,9 @@ scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=1000, T_mult=2, eta_min=1
 training_args = TrainingArguments(
     output_dir='./results',
     num_train_epochs=3,  # 
-    per_device_train_batch_size=8, # GPU allows increase batch size
-    per_device_eval_batch_size=8, # GPU allows increase batch size
-    gradient_accumulation_steps=2, # this helps in 
+    per_device_train_batch_size=16, # GPU allows increase batch size
+    per_device_eval_batch_size=16, # GPU allows increase batch size
+    gradient_accumulation_steps=4, # this helps in 
     eval_strategy="steps",
     eval_steps=100,  # 
     logging_steps=50,  # 
