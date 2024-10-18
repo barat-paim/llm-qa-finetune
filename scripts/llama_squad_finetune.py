@@ -1,6 +1,6 @@
 import torch
 import os
-os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:512, expandable_segments:True'
 torch.cuda.empty_cache()
 from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments, TrainerCallback
 from datasets import load_from_disk
@@ -9,10 +9,8 @@ from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
 import psutil
 import GPUtil
 from tqdm.auto import tqdm
-from torch.optim import Adam
-import time
-from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
-
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts  # Add this import
 
 def print_gpu_memory():
     allocated = torch.cuda.memory_allocated() / 1e9
@@ -123,8 +121,8 @@ def load_squad_dataset(tokenizer, max_train_samples=None, max_eval_samples=None)
     return SQuADDataset(train_dataset, tokenizer), SQuADDataset(eval_dataset, tokenizer)
 
 # Create datasets
-max_train_samples = 10000  # Reduced from 30000
-max_eval_samples = 1000   # Reduced from 3000
+max_train_samples = 10000
+max_eval_samples = 1000
 train_dataset, eval_dataset = load_squad_dataset(tokenizer, max_train_samples, max_eval_samples)
 print(f"Datasets loaded. Train size: {len(train_dataset)}, Eval size: {len(eval_dataset)}")
 
@@ -151,35 +149,35 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device:")
 print(device)
 
-# Setup optimizer with found learning rate
-optimizer = Adam(model.parameters(), lr=0.01)
-# Set up scheduler
+# Setup optimizer and scheduler
+optimizer = AdamW(model.parameters(), lr=0.01)
 scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=1000, T_mult=2, eta_min=1e-6)
 
 # Update training arguments
 training_args = TrainingArguments(
     output_dir='./results',
     num_train_epochs=3,  # 
-    per_device_train_batch_size=16, # GPU allows increase batch size
-    per_device_eval_batch_size=16, # GPU allows increase batch size
-    gradient_accumulation_steps=4, # this helps in 
+    per_device_train_batch_size=8, # GPU allows increase batch size
+    per_device_eval_batch_size=8, # GPU allows increase batch size
+    gradient_accumulation_steps=2, # this helps in 
     eval_strategy="steps",
     eval_steps=100,  # 
     logging_steps=50,  # 
     learning_rate=0.01, # Set default to 5e-5
     weight_decay=0.01,
-    fp16=True,
+    fp16=True,  # Enable mixed precision training
     bf16=False,
     max_grad_norm=0.3,
     max_steps=-1,
     warmup_ratio=0.03,
     group_by_length=True,
     save_strategy="steps",
-    save_steps=100, # 
+    save_steps=100,
     save_total_limit=2,
     load_best_model_at_end=True,
     optim="paged_adamw_32bit",
     lr_scheduler_type="cosine",
+    gradient_checkpointing=True,
 )
 
 print("Before trainer initialization:")
@@ -245,6 +243,7 @@ trainer = Trainer(
     train_dataset=train_dataset,
     eval_dataset=eval_dataset,
     callbacks=[GPUMemoryCallback(), LossCallback()],
+    optimizers=(optimizer, scheduler),
 )
 print("Trainer initialized.")
 print("GPU Memory for trainer:")
