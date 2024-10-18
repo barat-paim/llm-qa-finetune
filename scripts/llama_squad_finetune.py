@@ -176,7 +176,7 @@ training_args = TrainingArguments(
     save_steps=100,
     save_total_limit=2,
     load_best_model_at_end=True,
-    optim="paged_adamw_32bit",
+    optim="adamw_torch_fused",
     lr_scheduler_type="cosine",
     gradient_checkpointing=True,
 )
