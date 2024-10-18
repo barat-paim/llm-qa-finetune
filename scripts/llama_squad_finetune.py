@@ -145,16 +145,11 @@ def create_dataloaders(train_dataset, eval_dataset, batch_size, num_workers=4):
     return train_dataloader, eval_dataloader
 
 # New: Learning Rate Finder
-def find_learning_rate(model, train_dataset, device, batch_size=32, num_iterations=50, max_time=600):
-    # Create a simple sequential sampler instead of using Subset
+def find_learning_rate(model, train_dataset, device, batch_size=4, num_iterations=50, max_time=600, accumulation_steps=8):
     sampler = torch.utils.data.SequentialSampler(train_dataset)
     batch_sampler = torch.utils.data.BatchSampler(sampler, batch_size, drop_last=False)
     
-    # Limit the number of batches
-    limited_batch_sampler = torch.utils.data.BatchSampler(
-        sampler, batch_size, drop_last=False
-    )
-    limited_batch_sampler = [batch for batch in limited_batch_sampler][:num_iterations]
+    limited_batch_sampler = [batch for batch in batch_sampler][:num_iterations * accumulation_steps]
     
     dataloader = DataLoader(train_dataset, batch_sampler=limited_batch_sampler)
     
@@ -164,32 +159,38 @@ def find_learning_rate(model, train_dataset, device, batch_size=32, num_iteratio
     model.train()
     lrs, losses = [], []
     start_time = time.time()
-    for batch in tqdm(dataloader, desc="Finding learning rate", total=len(limited_batch_sampler)):
+    accumulated_loss = 0
+    optimizer.zero_grad()
+    
+    for i, batch in enumerate(tqdm(dataloader, desc="Finding learning rate", total=len(limited_batch_sampler))):
         if (time.time() - start_time) > max_time:
             break
         
         batch = {k: v.to(device) for k, v in batch.items()}
-        optimizer.zero_grad()
         outputs = model(**batch)
-        loss = outputs.loss
+        loss = outputs.loss / accumulation_steps  # Normalize the loss
         loss.backward()
-        optimizer.step()
-        lr_scheduler.step()
+        accumulated_loss += loss.item()
         
-        lrs.append(optimizer.param_groups[0]['lr'])
-        losses.append(loss.item())
+        if (i + 1) % accumulation_steps == 0:
+            optimizer.step()
+            lr_scheduler.step()
+            lrs.append(optimizer.param_groups[0]['lr'])
+            losses.append(accumulated_loss)
+            accumulated_loss = 0
+            optimizer.zero_grad()
         
         if optimizer.param_groups[0]['lr'] > 10:
             break
     
     return lrs, losses
 
-# Use this function before training
+# Use the function
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device:")
 print(device)
 print("\nFinding optimal learning rate...")
-lrs, losses = find_learning_rate(model, train_dataset, device, num_iterations=50, max_time=600)
+lrs, losses = find_learning_rate(model, train_dataset, device, batch_size=4, num_iterations=50, max_time=600, accumulation_steps=8)
 optimal_lr = lrs[losses.index(min(losses))]
 print(f"Optimal learning rate found: {optimal_lr}")
 print(f"Time taken: {time.time() - start_time:.2f} seconds")
