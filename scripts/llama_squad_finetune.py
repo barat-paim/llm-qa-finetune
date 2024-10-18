@@ -80,18 +80,16 @@ class SQuADDataset(Dataset):
         context = example['context']
         answer = example['answers']['text'][0] if example['answers']['text'] else ""
 
-        # Construct input
         input_text = f"Question: {question}\nContext: {context}\nAnswer:"
         target_text = f" {answer}"
 
-        # Tokenize
         inputs = self.tokenizer(input_text, max_length=self.max_length, truncation=True, padding="max_length", return_tensors="pt")
         targets = self.tokenizer(target_text, max_length=self.max_length, truncation=True, padding="max_length", return_tensors="pt")
 
         input_ids = inputs.input_ids.squeeze()
         attention_mask = inputs.attention_mask.squeeze()
         labels = targets.input_ids.squeeze()
-        labels[labels == self.tokenizer.pad_token_id] = -100  # Ignore padding in loss
+        labels[labels == self.tokenizer.pad_token_id] = -100
 
         return {
             "input_ids": input_ids,
@@ -99,18 +97,25 @@ class SQuADDataset(Dataset):
             "labels": labels
         }
 
+def load_squad_dataset(tokenizer, max_train_samples=None, max_eval_samples=None):
+    squad_dataset = load_from_disk("./data/squad")
+    
+    train_dataset = squad_dataset['train']
+    eval_dataset = squad_dataset['validation']
+    
+    if max_train_samples is not None and len(train_dataset) > max_train_samples:
+        train_dataset = train_dataset.select(range(max_train_samples))
+    
+    if max_eval_samples is not None and len(eval_dataset) > max_eval_samples:
+        eval_dataset = eval_dataset.select(range(max_eval_samples))
+    
+    return SQuADDataset(train_dataset, tokenizer), SQuADDataset(eval_dataset, tokenizer)
+
 # Create datasets
-train_dataset = SQuADDataset(squad_dataset['train'], tokenizer)
-eval_dataset = SQuADDataset(squad_dataset['validation'], tokenizer)
+max_train_samples = 30000  # Adjust this number as needed
+max_eval_samples = 3000   # Adjust this number as needed
 
-# Reduce dataset size
-max_train_samples = 50000  # Adjust this number as needed
-max_eval_samples = 5000   # Adjust this number as needed
-
-if len(train_dataset) > max_train_samples:
-    train_dataset = train_dataset.select(range(max_train_samples))
-if len(eval_dataset) > max_eval_samples:
-    eval_dataset = eval_dataset.select(range(max_eval_samples))
+train_dataset, eval_dataset = load_squad_dataset(tokenizer, max_train_samples, max_eval_samples)
 
 # New: Optimized data loading function
 def create_dataloaders(train_dataset, eval_dataset, batch_size, num_workers=4):
