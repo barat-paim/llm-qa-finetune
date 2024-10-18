@@ -11,6 +11,8 @@ import GPUtil
 from tqdm.auto import tqdm
 from torch.optim import Adam
 import time
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
+
 
 def print_gpu_memory():
     allocated = torch.cuda.memory_allocated() / 1e9
