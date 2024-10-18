@@ -112,10 +112,12 @@ def load_squad_dataset(tokenizer, max_train_samples=None, max_eval_samples=None)
     return SQuADDataset(train_dataset, tokenizer), SQuADDataset(eval_dataset, tokenizer)
 
 # Create datasets
-max_train_samples = 30000  # Adjust this number as needed
-max_eval_samples = 3000   # Adjust this number as needed
+max_train_samples = 5000  # Reduced from 30000
+max_eval_samples = 500   # Reduced from 3000
 
+print("Loading datasets...")
 train_dataset, eval_dataset = load_squad_dataset(tokenizer, max_train_samples, max_eval_samples)
+print(f"Datasets loaded. Train size: {len(train_dataset)}, Eval size: {len(eval_dataset)}")
 
 # New: Optimized data loading function
 def create_dataloaders(train_dataset, eval_dataset, batch_size, num_workers=4):
@@ -161,21 +163,26 @@ def find_learning_rate(model, train_dataset, device, batch_size=8):
 
 # Use this function before training
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-lrs, losses = find_learning_rate(model, train_dataset, device)
-optimal_lr = lrs[losses.index(min(losses))]
-print(f"Optimal learning rate: {optimal_lr}")
 
-# Update the learning rate in training_args
+# Comment out or remove the learning rate finder
+# lrs, losses = find_learning_rate(model, train_dataset, device)
+# optimal_lr = lrs[losses.index(min(losses))]
+# print(f"Optimal learning rate: {optimal_lr}")
+
+# Use a default learning rate
+default_lr = 5e-5  # This is a common default for fine-tuning
+
+# Update training arguments
 training_args = TrainingArguments(
     output_dir='./results',
-    num_train_epochs=3,
-    per_device_train_batch_size=16,
-    per_device_eval_batch_size=16,
+    num_train_epochs=1,  # Reduced from 3 to 1
+    per_device_train_batch_size=8, # Reduced from 16 to 8
+    per_device_eval_batch_size=8, # Reduced from 16 to 8
     gradient_accumulation_steps=2,
     eval_strategy="steps",
-    eval_steps=250,
-    logging_steps=50,
-    learning_rate=optimal_lr,
+    eval_steps=100,  # Reduced from 250 to 100
+    logging_steps=10,  # Reduced from 50 to 10
+    learning_rate=default_lr, # Set default to 5e-5
     weight_decay=0.01,
     fp16=True,
     bf16=False,
@@ -184,7 +191,7 @@ training_args = TrainingArguments(
     warmup_ratio=0.03,
     group_by_length=True,
     save_strategy="steps",
-    save_steps=250,
+    save_steps=100, # Reduced from 250 to 100
     save_total_limit=2,
     load_best_model_at_end=True,
     optim="paged_adamw_32bit",
@@ -240,11 +247,10 @@ print_gpu_memory()
 print("Before training:")
 print_gpu_memory()
 
+print("Starting training...")
 trainer.train()
 
-print("After training:")
-print_gpu_memory()
-
-# Save the fine-tuned model
+print("Training completed. Saving model...")
 model.save_pretrained("./fine_tuned_llama_squad")
 tokenizer.save_pretrained("./fine_tuned_llama_squad")
+print("Model saved. Process complete.")
