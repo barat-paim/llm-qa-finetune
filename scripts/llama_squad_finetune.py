@@ -102,6 +102,15 @@ class SQuADDataset(Dataset):
 train_dataset = SQuADDataset(squad_dataset['train'], tokenizer)
 eval_dataset = SQuADDataset(squad_dataset['validation'], tokenizer)
 
+# Reduce dataset size
+max_train_samples = 50000  # Adjust this number as needed
+max_eval_samples = 5000   # Adjust this number as needed
+
+if len(train_dataset) > max_train_samples:
+    train_dataset = train_dataset.select(range(max_train_samples))
+if len(eval_dataset) > max_eval_samples:
+    eval_dataset = eval_dataset.select(range(max_eval_samples))
+
 # New: Optimized data loading function
 def create_dataloaders(train_dataset, eval_dataset, batch_size, num_workers=4):
     train_dataloader = DataLoader(
@@ -118,6 +127,12 @@ def create_dataloaders(train_dataset, eval_dataset, batch_size, num_workers=4):
         pin_memory=True
     )
     return train_dataloader, eval_dataloader
+
+def find_learning_rate(model, train_dataloader, eval_dataloader, num_epochs=3):
+    lr_finder = LRFinder(model, optimizer_cls=optim.AdamW, optimizer_kwargs={"lr": 1e-5}, num_training_steps=num_epochs * len(train_dataloader))
+    lr_finder.range_test(train_dataloader, end_lr=1, num_steps=100)
+    lr_finder.plot()
+    lr_finder.reset()
 
 # Use this function after creating your datasets
 train_dataloader, eval_dataloader = create_dataloaders(train_dataset, eval_dataset, batch_size=8)
