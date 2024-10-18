@@ -184,7 +184,6 @@ training_args = TrainingArguments(
     load_best_model_at_end=True,
     optim="paged_adamw_32bit",
     lr_scheduler_type="cosine",
-    fp16=True,
 )
 
 print("Before trainer initialization:")
