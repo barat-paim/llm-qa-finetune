@@ -144,56 +144,15 @@ def create_dataloaders(train_dataset, eval_dataset, batch_size, num_workers=4):
     )
     return train_dataloader, eval_dataloader
 
-# New: Learning Rate Finder
-def find_learning_rate(model, train_dataset, device, batch_size=4, num_iterations=50, max_time=600, accumulation_steps=8):
-    sampler = torch.utils.data.SequentialSampler(train_dataset)
-    batch_sampler = torch.utils.data.BatchSampler(sampler, batch_size, drop_last=False)
-    
-    limited_batch_sampler = [batch for batch in batch_sampler][:num_iterations * accumulation_steps]
-    
-    dataloader = DataLoader(train_dataset, batch_sampler=limited_batch_sampler)
-    
-    optimizer = Adam(model.parameters(), lr=1e-7)
-    lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=2.0)
-    
-    model.train()
-    lrs, losses = [], []
-    start_time = time.time()
-    accumulated_loss = 0
-    optimizer.zero_grad()
-    
-    for i, batch in enumerate(tqdm(dataloader, desc="Finding learning rate", total=len(limited_batch_sampler))):
-        if (time.time() - start_time) > max_time:
-            break
-        
-        batch = {k: v.to(device) for k, v in batch.items()}
-        outputs = model(**batch)
-        loss = outputs.loss / accumulation_steps  # Normalize the loss
-        loss.backward()
-        accumulated_loss += loss.item()
-        
-        if (i + 1) % accumulation_steps == 0:
-            optimizer.step()
-            lr_scheduler.step()
-            lrs.append(optimizer.param_groups[0]['lr'])
-            losses.append(accumulated_loss)
-            accumulated_loss = 0
-            optimizer.zero_grad()
-        
-        if optimizer.param_groups[0]['lr'] > 10:
-            break
-    
-    return lrs, losses
-
 # Use the function
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device:")
 print(device)
-print("\nFinding optimal learning rate...")
-lrs, losses = find_learning_rate(model, train_dataset, device, batch_size=4, num_iterations=50, max_time=600, accumulation_steps=8)
-optimal_lr = lrs[losses.index(min(losses))]
-print(f"Optimal learning rate found: {optimal_lr}")
-print(f"Time taken: {time.time() - start_time:.2f} seconds")
+
+# Setup optimizer with found learning rate
+optimizer = Adam(model.parameters(), lr=0.01)
+# Set up scheduler
+scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=1000, T_mult=2, eta_min=1e-6)
 
 # Update training arguments
 training_args = TrainingArguments(
@@ -205,7 +164,7 @@ training_args = TrainingArguments(
     eval_strategy="steps",
     eval_steps=100,  # 
     logging_steps=50,  # 
-    learning_rate=optimal_lr, # Set default to 5e-5
+    learning_rate=0.01, # Set default to 5e-5
     weight_decay=0.01,
     fp16=True,
     bf16=False,
@@ -254,6 +213,28 @@ class GPUMemoryCallback(TrainerCallback):
         if logs:
             self.progress_bar.set_postfix(logs)
 
+# Class Loss Callback
+class LossCallback(TrainerCallback):
+    def __init__(self, early_stopping_patience=5):
+        self.early_stopping_patience = early_stopping_patience
+        self.best_loss = float('inf')
+        self.no_improvement_count = 0
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if state.global_step < 2000 and 'loss' in logs:
+            current_loss = logs['loss']
+            if current_loss > self.best_loss * 2:
+                print(f"Warning: Loss spike detected at step {state.global_step}. Current loss: {current_loss}")
+            elif current_loss < self.best_loss:
+                self.best_loss = current_loss
+                self.no_improvement_count = 0
+            else:
+                self.no_improvement_count += 1
+                
+            if self.no_improvement_count >= self.early_stopping_patience:
+                print(f"No improvement for {self.early_stopping_patience} steps. Consider adjusting learning rate.")
+                self.no_improvement_count = 0  # Reset the counter
+
 # Initialize Trainer with the new callback
 print("Initializing Trainer..")
 trainer = Trainer(
@@ -261,7 +242,7 @@ trainer = Trainer(
     args=training_args,
     train_dataset=train_dataset,
     eval_dataset=eval_dataset,
-    callbacks=[GPUMemoryCallback()],
+    callbacks=[GPUMemoryCallback(), LossCallback()],
 )
 print("Trainer initialized.")
 print("GPU Memory for trainer:")
