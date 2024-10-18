@@ -9,6 +9,7 @@ from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
 import psutil
 import GPUtil
 from tqdm.auto import tqdm
+from torch.optim import Adam
 
 def print_gpu_memory():
     allocated = torch.cuda.memory_allocated() / 1e9
@@ -128,17 +129,38 @@ def create_dataloaders(train_dataset, eval_dataset, batch_size, num_workers=4):
     )
     return train_dataloader, eval_dataloader
 
-def find_learning_rate(model, train_dataloader, eval_dataloader, num_epochs=3):
-    lr_finder = LRFinder(model, optimizer_cls=optim.AdamW, optimizer_kwargs={"lr": 1e-5}, num_training_steps=num_epochs * len(train_dataloader))
-    lr_finder.range_test(train_dataloader, end_lr=1, num_steps=100)
-    lr_finder.plot()
-    lr_finder.reset()
+# New: Learning Rate Finder
+def find_learning_rate(model, train_dataset, device, batch_size=8):
+    dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    optimizer = Adam(model.parameters(), lr=1e-7)
+    lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=1.1)
+    
+    model.train()
+    lrs, losses = [], []
+    for batch in dataloader:
+        batch = {k: v.to(device) for k, v in batch.items()}
+        optimizer.zero_grad()
+        outputs = model(**batch)
+        loss = outputs.loss
+        loss.backward()
+        optimizer.step()
+        lr_scheduler.step()
+        
+        lrs.append(optimizer.param_groups[0]['lr'])
+        losses.append(loss.item())
+        
+        if optimizer.param_groups[0]['lr'] > 10:
+            break
+    
+    return lrs, losses
 
-# Use this function after creating your datasets
-train_dataloader, eval_dataloader = create_dataloaders(train_dataset, eval_dataset, batch_size=8)
+# Use this function before training
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+lrs, losses = find_learning_rate(model, train_dataset, device)
+optimal_lr = lrs[losses.index(min(losses))]
+print(f"Optimal learning rate: {optimal_lr}")
 
-# Step 4: Fine-Tuning Loop
-# New: Updated TrainingArguments for better performance
+# Update the learning rate in training_args
 training_args = TrainingArguments(
     output_dir='./results',
     num_train_epochs=3,
@@ -148,7 +170,7 @@ training_args = TrainingArguments(
     eval_strategy="steps",
     eval_steps=250,
     logging_steps=50,
-    learning_rate=5e-4,
+    learning_rate=optimal_lr,
     weight_decay=0.01,
     fp16=True,
     bf16=False,
