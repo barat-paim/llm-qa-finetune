@@ -112,8 +112,8 @@ def load_squad_dataset(tokenizer, max_train_samples=None, max_eval_samples=None)
     return SQuADDataset(train_dataset, tokenizer), SQuADDataset(eval_dataset, tokenizer)
 
 # Create datasets
-max_train_samples = 5000  # Reduced from 30000
-max_eval_samples = 500   # Reduced from 3000
+max_train_samples = 10000  # Reduced from 30000
+max_eval_samples = 1000   # Reduced from 3000
 
 print("Loading datasets...")
 train_dataset, eval_dataset = load_squad_dataset(tokenizer, max_train_samples, max_eval_samples)
