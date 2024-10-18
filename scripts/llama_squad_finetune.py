@@ -4,12 +4,13 @@ os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 torch.cuda.empty_cache()
 from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments, TrainerCallback
 from datasets import load_from_disk
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
 import psutil
 import GPUtil
 from tqdm.auto import tqdm
 from torch.optim import Adam
+import time
 
 def print_gpu_memory():
     allocated = torch.cuda.memory_allocated() / 1e9
@@ -144,15 +145,22 @@ def create_dataloaders(train_dataset, eval_dataset, batch_size, num_workers=4):
     return train_dataloader, eval_dataloader
 
 # New: Learning Rate Finder
-def find_learning_rate(model, train_dataset, device, batch_size=8):
-    print("\nFinding learning rate:\n")
-    dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+def find_learning_rate(model, train_dataset, device, batch_size=32, num_iterations=50, max_time=600):
+    subset_size = min(len(train_dataset), num_iterations * batch_size)
+    subset_indices = torch.randperm(len(train_dataset))[:subset_size]
+    subset_dataset = Subset(train_dataset, subset_indices)
+    
+    dataloader = DataLoader(subset_dataset, batch_size=batch_size, shuffle=True)
     optimizer = Adam(model.parameters(), lr=1e-7)
-    lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=1.1)
-    print("\nTraining a model to find learning rate:\n")
+    lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=2.0)  # Steeper increase
+    
     model.train()
     lrs, losses = [], []
-    for batch in tqdm(dataloader, desc="Finding learning rate"):
+    start_time = time.time()
+    for batch in tqdm(dataloader, desc="Finding learning rate", total=num_iterations):
+        if len(lrs) >= num_iterations or (time.time() - start_time) > max_time:
+            break
+        
         batch = {k: v.to(device) for k, v in batch.items()}
         optimizer.zero_grad()
         outputs = model(**batch)
@@ -160,21 +168,24 @@ def find_learning_rate(model, train_dataset, device, batch_size=8):
         loss.backward()
         optimizer.step()
         lr_scheduler.step()
+        
         lrs.append(optimizer.param_groups[0]['lr'])
         losses.append(loss.item())
-        print(f"\nLearning rate: {optimizer.param_groups[0]['lr']}, Loss: {loss.item()}\n")
+        
         if optimizer.param_groups[0]['lr'] > 10:
             break
-    print(f"\nLearning rate found")
+    
     return lrs, losses
 
 # Use this function before training
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("\nDevice:\n")
 print(device)
-lrs, losses = find_learning_rate(model, train_dataset, device)
+print("Finding optimal learning rate...")
+lrs, losses = find_learning_rate(model, train_dataset, device, num_iterations=50, max_time=600)
 optimal_lr = lrs[losses.index(min(losses))]
-print(f"\nOptimal learning rate: {optimal_lr}\n")
+print(f"Optimal learning rate found: {optimal_lr}")
+print(f"Time taken: {time.time() - start_time:.2f} seconds")
 
 # Update training arguments
 training_args = TrainingArguments(
