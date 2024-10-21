@@ -74,7 +74,7 @@ def evaluate_model(eval_loader, model, tokenizer, device):
     # Set pad_token_id to eos_token_id once before the loop
     model.config.pad_token_id = model.config.eos_token_id
     
-    with torch.no_grad():  # Disable gradient calculation for inference
+    with torch.no_grad():
         for batch_idx, batch in enumerate(tqdm(eval_loader, desc="Evaluating")):
             if batch_idx % 100 == 0:  # Log GPU usage every 100 batches
                 logger.info(monitor_gpu())
@@ -83,11 +83,16 @@ def evaluate_model(eval_loader, model, tokenizer, device):
             contexts = batch['context']
             true_answers = batch['answers']['text']
             
-            # Prepare input text in batch
-            batch_inputs = [f"Question: {q}\nContext: {c}\nAnswer:" for q, c in zip(questions, contexts)]
-            inputs = tokenizer(batch_inputs, return_tensors="pt", padding=True, truncation=True).to(device)
+            # Set padding to 'left' and ensure consistent padding across batch
+            inputs = tokenizer(
+                [f"Question: {q}\nContext: {c}\nAnswer:" for q, c in zip(questions, contexts)],
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=512,  # Adjust this based on your input length
+                padding_side="left"
+            ).to(device)
             
-            # Generate answers
             outputs = model.generate(
                 **inputs,
                 max_new_tokens=50,
@@ -97,7 +102,6 @@ def evaluate_model(eval_loader, model, tokenizer, device):
             )
             generated_answers = tokenizer.batch_decode(outputs, skip_special_tokens=True)
             
-            # Evaluate each generated answer in the batch
             for gen_answer, true_ans_list, question, context in zip(generated_answers, true_answers, questions, contexts):
                 gen_answer = gen_answer.replace("Answer:", "").strip()
                 best_f1 = max(compute_f1(gen_answer, true_ans) for true_ans in true_ans_list)
