@@ -5,6 +5,18 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from datasets import load_from_disk
 import logging
 from collections import Counter
+import psutil
+import time
+import os
+import GPUtil
+
+# Monitoring GPU
+def monitor_gpu():
+    gpus = GPUtil.getGPUs()
+    if gpus:
+        gpu = gpus[0]  # Assuming we're using the first GPU
+        return f"GPU Memory Usage: {gpu.memoryUsed}MB / {gpu.memoryTotal}MB ({gpu.memoryUtil*100:.2f}%)"
+    return "No GPU detected"
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -50,46 +62,68 @@ def compute_exact(predicted, ground_truth):
     return int(predicted.strip() == ground_truth.strip())
 
 # Function to evaluate the model using batches
-def evaluate_model(eval_loader, model, device):
+def evaluate_model(eval_loader, model, tokenizer, device):
     total_f1 = 0
     total_em = 0
     num_examples = len(eval_loader.dataset)
+    incorrect_predictions = []  # To store failed predictions
     
     logger.info(f"Evaluating {num_examples} examples....")
     model.eval()
     
     with torch.no_grad():  # Disable gradient calculation for inference
         for batch_idx, batch in enumerate(tqdm(eval_loader, desc="Evaluating")):
+            if batch_idx % 10 == 0:  # Log GPU usage every 10 batches
+                logger.info(monitor_gpu())
+            
             questions = batch['question']
             contexts = batch['context']
             true_answers = batch['answers']['text']
             
-            logger.info(f"Evaluating batch {batch_idx + 1} of {len(eval_loader)}")
             # Prepare input text in batch
             batch_inputs = [f"Question: {q}\nContext: {c}\nAnswer:" for q, c in zip(questions, contexts)]
             inputs = tokenizer(batch_inputs, return_tensors="pt", padding=True, truncation=True).to(device)
             
             # Generate answers
-            logger.info(f"Generating answers for batch {batch_idx + 1} of {len(eval_loader)}")
             outputs = model.generate(**inputs, max_new_tokens=50)
             generated_answers = tokenizer.batch_decode(outputs, skip_special_tokens=True)
             
             # Evaluate each generated answer in the batch
-            for gen_answer, true_ans_list in zip(generated_answers, true_answers):
+            for gen_answer, true_ans_list, question, context in zip(generated_answers, true_answers, questions, contexts):
                 gen_answer = gen_answer.replace("Answer:", "").strip()
                 best_f1 = max(compute_f1(gen_answer, true_ans) for true_ans in true_ans_list)
                 best_em = max(compute_exact(gen_answer, true_ans) for true_ans in true_ans_list)
+                
+                # Log failure cases (when both F1 and EM are low)
+                if best_f1 < 0.5 and best_em == 0:
+                    incorrect_predictions.append({
+                        "question": question,
+                        "context": context,
+                        "generated_answer": gen_answer,
+                        "true_answers": true_ans_list
+                    })
                 
                 total_f1 += best_f1
                 total_em += best_em
     
     avg_f1 = total_f1 / num_examples
     avg_em = total_em / num_examples
-    
     logger.info(f"Finished evaluating all examples")
-    return avg_f1, avg_em
+    logger.info(monitor_gpu())  # Log final GPU usage
+    
+    # Log incorrect predictions for further analysis
+    logger.info(f"Number of Incorrect Predictions: {len(incorrect_predictions)}")
+    for i, failure in enumerate(incorrect_predictions[:5]):  # Limit to 5 examples for display
+        logger.info(f"\nIncorrect Prediction {i+1}:")
+        logger.info(f"Question: {failure['question']}")
+        logger.info(f"Context: {failure['context']}")
+        logger.info(f"Generated Answer: {failure['generated_answer']}")
+        logger.info(f"True Answers: {failure['true_answers']}")
+    
+    return avg_f1, avg_em, incorrect_predictions
 
 # Run the evaluation and print the results
-avg_f1, avg_em = evaluate_model(eval_loader, model, device)
+avg_f1, avg_em, incorrect_predictions = evaluate_model(eval_loader, model, tokenizer, device)
 logger.info(f"Average F1 Score: {avg_f1:.4f}")
 logger.info(f"Average Exact Match (EM) Score: {avg_em:.4f}")
+logger.info(f"Total Incorrect Predictions: {len(incorrect_predictions)}")
