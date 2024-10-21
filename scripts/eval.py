@@ -45,12 +45,6 @@ def custom_collate_fn(batch):
     contexts = [item['context'] for item in batch]
     answers = [item['answers'] for item in batch]
     
-    # Pad the 'text' field in answers if it exists and has variable length
-    if 'text' in answers[0]:
-        max_answers = max(len(a['text']) for a in answers)
-        for a in answers:
-            a['text'] = a['text'] + [''] * (max_answers - len(a['text']))
-    
     return {
         'question': questions,
         'context': contexts,
@@ -100,7 +94,7 @@ def evaluate_model(eval_loader, model, tokenizer, device):
             
             questions = batch['question']
             contexts = batch['context']
-            true_answers = batch['answers']['text']
+            true_answers = batch['answers']
             
             inputs = tokenizer(
                 [f"Question: {q}\nContext: {c}\nAnswer:" for q, c in zip(questions, contexts)],
@@ -120,12 +114,12 @@ def evaluate_model(eval_loader, model, tokenizer, device):
             )
             generated_answers = tokenizer.batch_decode(outputs, skip_special_tokens=True)
             
-            for gen_answer, true_ans_list, question, context in zip(generated_answers, true_answers, questions, contexts):
+            for gen_answer, true_ans, question, context in zip(generated_answers, true_answers, questions, contexts):
                 gen_answer = gen_answer.replace("Answer:", "").strip()
+                true_ans_list = true_ans['text']  # Access 'text' field here
                 best_f1 = max(compute_f1(gen_answer, true_ans) for true_ans in true_ans_list if true_ans)
                 best_em = max(compute_exact(gen_answer, true_ans) for true_ans in true_ans_list if true_ans)
                 
-                # Log failure cases (when both F1 and EM are low)
                 if best_f1 < 0.5 and best_em == 0:
                     incorrect_predictions.append({
                         "question": question,
