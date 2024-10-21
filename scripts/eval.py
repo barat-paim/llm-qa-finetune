@@ -3,6 +3,11 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from datasets import load_from_disk
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load the fine-tuned model
 model_path = "./fine_tuned_llama_squad"
@@ -13,13 +18,16 @@ tokenizer.padding_side = 'left'
 # Check if CUDA (GPU) is available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = model.to(device)
+logger.info(f"Model is on {device}")
 
 # Load the SQuAD validation dataset
 squad_dataset = load_from_disk("./data/squad")
 eval_dataset = squad_dataset['validation']
 
 # Create a DataLoader for batch evaluation
+logger.info(f"Loaded {len(eval_dataset)} examples")
 eval_loader = DataLoader(eval_dataset, batch_size=8, shuffle=False)
+logger.info(f"Loaded {len(eval_loader)} batches")
 
 # Define functions to calculate F1 Score and Exact Match (EM)
 def compute_f1(predicted, ground_truth):
@@ -82,5 +90,5 @@ def evaluate_model(eval_loader, model, device):
 
 # Run the evaluation and print the results
 avg_f1, avg_em = evaluate_model(eval_loader, model, device)
-print(f"Average F1 Score: {avg_f1:.4f}")
-print(f"Average Exact Match (EM) Score: {avg_em:.4f}")
+logger.info(f"Average F1 Score: {avg_f1:.4f}")
+logger.info(f"Average Exact Match (EM) Score: {avg_em:.4f}")
