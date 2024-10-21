@@ -71,9 +71,12 @@ def evaluate_model(eval_loader, model, tokenizer, device):
     logger.info(f"Evaluating {num_examples} examples....")
     model.eval()
     
+    # Set pad_token_id to eos_token_id once before the loop
+    model.config.pad_token_id = model.config.eos_token_id
+    
     with torch.no_grad():  # Disable gradient calculation for inference
         for batch_idx, batch in enumerate(tqdm(eval_loader, desc="Evaluating")):
-            if batch_idx % 10 == 0:  # Log GPU usage every 10 batches
+            if batch_idx % 100 == 0:  # Log GPU usage every 100 batches
                 logger.info(monitor_gpu())
             
             questions = batch['question']
