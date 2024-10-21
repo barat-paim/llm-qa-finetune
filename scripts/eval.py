@@ -88,7 +88,13 @@ def evaluate_model(eval_loader, model, tokenizer, device):
             inputs = tokenizer(batch_inputs, return_tensors="pt", padding=True, truncation=True).to(device)
             
             # Generate answers
-            outputs = model.generate(**inputs, max_new_tokens=50)
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=50,
+                pad_token_id=model.config.eos_token_id,
+                eos_token_id=model.config.eos_token_id,
+                use_cache=True
+            )
             generated_answers = tokenizer.batch_decode(outputs, skip_special_tokens=True)
             
             # Evaluate each generated answer in the batch
