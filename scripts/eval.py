@@ -39,7 +39,7 @@ eval_dataset = squad_dataset['validation']
 
 # Create a DataLoader for batch evaluation
 logger.info(f"Loaded {len(eval_dataset)} examples")
-eval_loader = DataLoader(eval_dataset, batch_size=8, shuffle=False)
+eval_loader = DataLoader(eval_dataset, batch_size=12, shuffle=False)
 logger.info(f"Loaded {len(eval_loader)} batches")
 
 # Define functions to calculate F1 Score and Exact Match (EM)
