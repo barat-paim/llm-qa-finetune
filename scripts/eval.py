@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from datasets import load_from_disk
 import logging
+from collections import Counter
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
