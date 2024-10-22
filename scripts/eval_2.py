@@ -1,16 +1,27 @@
 import torch
-from utils import compute_f1, compute_exact
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
+# Define compute_f1 and compute_exact functions here if they're not in a separate utils file
+def compute_f1(prediction, ground_truth):
+    prediction_tokens = prediction.lower().split()
+    ground_truth_tokens = ground_truth.lower().split()
+    common = set(prediction_tokens) & set(ground_truth_tokens)
+    if not common:
+        return 0
+    precision = len(common) / len(prediction_tokens)
+    recall = len(common) / len(ground_truth_tokens)
+    return (2 * precision * recall) / (precision + recall)
+
+def compute_exact(prediction, ground_truth):
+    return int(prediction.lower() == ground_truth.lower())
 
 # load model and tokenizer
-model = AutoModelForCausalLM.from_pretrained("microsoft/phi-3-small-instruct")
-tokenizer = AutoTokenizer.from_pretrained("microsoft/phi-3-small-instruct")
+model_path = "./fine_tuned_llama_squad"
+model = AutoModelForCausalLM.from_pretrained(model_path)
+tokenizer = AutoTokenizer.from_pretrained(model_path)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# load eval data
-eval_data = load_jsonl("data/eval.jsonl")
+model.to(device)
 
 # evaluate single question
 def evaluate_single_question(model, tokenizer, device, question, context, true_answers):
@@ -51,6 +62,9 @@ true_answers = ['Denver Broncos', 'Denver Broncos', 'Denver Broncos']
 
 generated_answer, f1_score, em_score = evaluate_single_question(model, tokenizer, device, question, context, true_answers)
 
+print(f"Question: {question}")
+print(f"Context: {context}")
 print(f"Generated Answer: {generated_answer}")
+print(f"True Answers: {true_answers}")
 print(f"F1 Score: {f1_score}")
 print(f"Exact Match Score: {em_score}")
