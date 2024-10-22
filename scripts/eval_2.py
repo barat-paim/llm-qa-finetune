@@ -1,6 +1,6 @@
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-
+import textwrap
 # Define compute_f1 and compute_exact functions here if they're not in a separate utils file
 def compute_f1(prediction, ground_truth):
     prediction_tokens = prediction.lower().split()
@@ -16,7 +16,7 @@ def compute_exact(prediction, ground_truth):
     return int(prediction.lower() == ground_truth.lower())
 
 # Load the pre-trained LLaMA model
-model_path = "./llama_3_2_1b_model"  # Path to the pre-trained model
+model_path = "./fine_tuned_llama_squad"  # or use: "./llama_3_2_1b_model"
 model = AutoModelForCausalLM.from_pretrained(model_path)
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 
@@ -62,13 +62,22 @@ def evaluate_single_question(model, tokenizer, device, question, context, true_a
 # Example usage
 question = "Which NFL team represented the AFC at Super Bowl 50?"
 context = "Super Bowl 50 was an American football game to determine the champion of the National Football League (NFL) for the 2015 season. The American Football Conference (AFC) champion Denver Broncos defeated the National Football Conference (NFC) champion Carolina Panthers 24–10 to earn their third Super Bowl title."
-true_answers = ['Denver Broncos', 'Denver Broncos', 'Denver Broncos']
+true_answers = ['Denver Broncos']
 
 generated_answer, f1_score, em_score = evaluate_single_question(model, tokenizer, device, question, context, true_answers)
 
-print(f"Question: {question}")
-print(f"Context: {context}")
-print(f"Generated Answer: {generated_answer}")
-print(f"True Answers: {true_answers}")
-print(f"F1 Score: {f1_score}")
-print(f"Exact Match Score: {em_score}")
+
+
+# Define the total width for right-side indentation
+total_width = 50
+padding = 2
+# Print with left and right indentation
+print("=" * total_width)
+print(f"\n{' ' * padding}Question: {question:<{total_width - padding - 4}}\n")
+print(f"{' ' * padding}Context: {textwrap.fill(context, width=total_width - padding - 4)}\n")
+print(f"{' ' * padding}Generated Answer: {generated_answer:<{total_width - padding - 4}}\n")
+print(f"{' ' * padding}True Answers: {true_answers}")
+print(f"{' ' * padding}F1 Score: {f1_score}")
+print(f"{' ' * padding}Exact Match Score: {em_score}\n")
+print("=" * total_width)
+
