@@ -15,15 +15,15 @@ def compute_f1(prediction, ground_truth):
 def compute_exact(prediction, ground_truth):
     return int(prediction.lower() == ground_truth.lower())
 
-# load model and tokenizer
-model_path = "./fine_tuned_llama_squad"
+# Load the pre-trained LLaMA model
+model_path = "./llama_3_2_1b_model"  # Path to the pre-trained model
 model = AutoModelForCausalLM.from_pretrained(model_path)
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.to(device)
 
-# evaluate single question
+# Evaluate single question
 def evaluate_single_question(model, tokenizer, device, question, context, true_answers):
     model.eval()
     
