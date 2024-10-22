@@ -20,6 +20,10 @@ model_path = "./llama_3_2_1b_model"  # Path to the pre-trained model
 model = AutoModelForCausalLM.from_pretrained(model_path)
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 
+# Set padding token
+tokenizer.pad_token = tokenizer.eos_token
+model.config.pad_token_id = model.config.eos_token_id
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.to(device)
 
